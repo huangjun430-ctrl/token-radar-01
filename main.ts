@@ -49,16 +49,22 @@ if (!existsSync(inputPath)) {
 const outputDir = flag('output', process.env.MAKEFUN_OUTPUT_DIR ?? '/output');
 
 const snapshot = parseSnapshot(readFileSync(inputPath, 'utf8'));
+// A snapshot with nothing to score is not a snapshot to score: refuse it
+// before any output is written, so a bad input never leaves a stale board behind.
+if (snapshot.protocols.length === 0) {
+  process.stderr.write(`token radar: snapshot at ${inputPath} holds no protocols\n`);
+  process.exit(2);
+}
+if (snapshot.watchlist.length === 0) {
+  process.stderr.write(`token radar: snapshot at ${inputPath} has an empty watchlist\n`);
+  process.exit(2);
+}
 const { board, radar } = buildRadar(snapshot);
 const problem = boardIssue(board, snapshot);
 if (problem !== null) {
   process.stderr.write(`token radar: the model wrote a board the gate refuses: ${problem}\n`);
   process.exit(1);
 }
-
-mkdirSync(outputDir, { recursive: true });
-writeFileSync(join(outputDir, 'board.json'), `${JSON.stringify({ rows: board })}\n`);
-writeFileSync(join(outputDir, 'data.js'), dataScript(radar));
 
 // Copy one directory's plain files into `dest`, skipping dotfiles; returns names.
 function copyDir(from: string, dest: string): string[] {
@@ -75,32 +81,44 @@ function copyDir(from: string, dest: string): string[] {
   return names;
 }
 
-copyDir(join(repoRoot, 'dashboard'), join(outputDir, 'dashboard'));
-const shots = copyDir(join(repoRoot, 'screenshots'), join(outputDir, 'screenshots'));
-if (shots.length < 3) {
-  process.stderr.write(
-    `token radar: screenshots/ holds ${shots.length} image${shots.length === 1 ? '' : 's'}: hand in 3, the board, a detail view and a filtered view\n`,
-  );
-  process.exit(1);
-}
-for (const name of shots) {
-  if (!SHOT_NAME.test(name)) {
+// Write every output file for a scored board, in a fixed order, and return the
+// screenshot names that were copied. The board and data go first, then the
+// dashboard and screenshots, and the dossier goes last: the scorer rebuilds it
+// from this output and compares bytes, so nothing may be written after it.
+function writeOutputs(outputDir: string, board: typeof board, radar: typeof radar): string[] {
+  mkdirSync(outputDir, { recursive: true });
+  writeFileSync(join(outputDir, 'board.json'), `${JSON.stringify({ rows: board })}\n`);
+  writeFileSync(join(outputDir, 'data.js'), dataScript(radar));
+
+  copyDir(join(repoRoot, 'dashboard'), join(outputDir, 'dashboard'));
+  const shots = copyDir(join(repoRoot, 'screenshots'), join(outputDir, 'screenshots'));
+  if (shots.length < 3) {
     process.stderr.write(
-      `token radar: screenshots/${name}: a name is letters, digits and . _ -, 1 to 128 characters\n`,
+      `token radar: screenshots/ holds ${shots.length} image${shots.length === 1 ? '' : 's'}: hand in 3, the board, a detail view and a filtered view\n`,
     );
     process.exit(1);
   }
+  for (const name of shots) {
+    if (!SHOT_NAME.test(name)) {
+      process.stderr.write(
+        `token radar: screenshots/${name}: a name is letters, digits and . _ -, 1 to 128 characters\n`,
+      );
+      process.exit(1);
+    }
+  }
+
+  writeFileSync(
+    join(outputDir, 'dossier.json'),
+    buildDossier(outputDir, {
+      text_max_bytes: TEXT_CAP_BYTES,
+      screenshots: SHOT_CAP,
+      dashboard: { max_files: 400, max_bytes: 4_194_304 },
+    }),
+  );
+  return shots;
 }
 
-// The dossier goes last: the scorer rebuilds it from this output and compares bytes.
-writeFileSync(
-  join(outputDir, 'dossier.json'),
-  buildDossier(outputDir, {
-    text_max_bytes: TEXT_CAP_BYTES,
-    screenshots: SHOT_CAP,
-    dashboard: { max_files: 400, max_bytes: 4_194_304 },
-  }),
-);
+const shots = writeOutputs(outputDir, board, radar);
 
 process.stdout.write(
   `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live set aside)\n` +
