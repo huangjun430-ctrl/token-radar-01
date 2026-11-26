@@ -254,7 +254,8 @@ export interface BoardRow {
     no_7d_data: boolean;
     global_fit: boolean;
   };
-  farm_steps: FarmStepDetail[];
+  farm_steps: string[];
+  farm_step_details: FarmStepDetail[];
 }
 
 export interface RadarRow {
@@ -1659,7 +1660,8 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
         no_7d_data: x.p.change_7d === null,
         global_fit: !x.isCategoryFit,
       },
-      farm_steps: x.details,
+      farm_steps: x.steps.map(stepText),
+      farm_step_details: x.details,
     };
   });
 
@@ -1763,7 +1765,7 @@ export function boardIssue(board: BoardRow[], snapshot: Snapshot): string | null
   }
   for (const r of board) {
     if (r.farm_steps.length < 3 || r.farm_steps.length > 12) return `${r.slug} has ${r.farm_steps.length} farm steps`;
-    for (const s of r.farm_steps) if (s.text.length < 20 || s.text.length > 600) return `${r.slug} has a farm step of ${s.text.length} characters`;
+    for (const s of r.farm_steps) if (s.length < 20 || s.length > 600) return `${r.slug} has a farm step of ${s.length} characters`;
     if (!Number.isSafeInteger(r.implied_value_usd) || r.implied_value_usd <= 0) return `${r.slug} has implied value ${r.implied_value_usd}`;
     if (r.implied_low_usd > r.implied_value_usd || r.implied_value_usd > r.implied_high_usd) return `${r.slug} violates low <= implied <= high`;
     if (r.launch_odds < 0.01 || r.launch_odds > 0.99) return `${r.slug} has out-of-range launch_odds ${r.launch_odds}`;
